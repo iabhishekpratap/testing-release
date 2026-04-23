@@ -4,7 +4,7 @@ set -e
 
 echo "🔍 Detecting changed services..."
 
-# Get changed files (works in CI + local)
+# Detect changes
 CHANGED_FILES=$(git diff --name-only origin/main...HEAD 2>/dev/null || git diff --name-only HEAD~1 HEAD)
 
 echo "Changed files:"
@@ -12,11 +12,9 @@ echo "$CHANGED_FILES"
 echo "------------------------------------"
 
 SERVICES=()
-
-# Define your microservices here
 ALL_SERVICES=("dir1" "dir2")
 
-# Detect changes per folder
+# Detect changed services
 for SERVICE in "${ALL_SERVICES[@]}"; do
   if echo "$CHANGED_FILES" | grep -q "^${SERVICE}/"; then
     echo "✅ Changes detected in $SERVICE"
@@ -33,69 +31,36 @@ fi
 
 echo "------------------------------------"
 
-# Process each changed service
+# Process each service
 for SERVICE in "${SERVICES[@]}"; do
   echo "🚀 Processing $SERVICE..."
 
-  # Get last tag for this service
   LAST_TAG=$(git tag --list "${SERVICE}-v*" --sort=-v:refname | head -n 1)
 
-  # -------------------------------
-  # FIRST RELEASE
-  # -------------------------------
   if [ -z "$LAST_TAG" ]; then
-    echo "⚠️ No previous tag found for $SERVICE. Creating initial release 1.0.0"
-
-    NEW_VERSION="1.0.0"
-    NEW_TAG="${SERVICE}-v${NEW_VERSION}"
-
-    if git rev-parse "$NEW_TAG" >/dev/null 2>&1; then
-      echo "⚠️ Tag $NEW_TAG already exists, skipping..."
-      continue
-    fi
-
-    echo "🏷️ Creating initial tag: $NEW_TAG"
-    git tag $NEW_TAG
-    git push origin $NEW_TAG
-
-    if command -v gh &> /dev/null; then
-      gh release create $NEW_TAG \
-        --title "$NEW_TAG" \
-        --notes "Initial release for $SERVICE"
-    else
-      echo "⚠️ gh CLI not installed, skipping GitHub release"
-    fi
-
-    echo "✅ Initial release done for $SERVICE"
-    echo "------------------------------------"
-    continue
+    VERSION="0.0.0"
+  else
+    VERSION=${LAST_TAG#${SERVICE}-v}
   fi
 
-  # -------------------------------
-  # NORMAL RELEASE FLOW
-  # -------------------------------
-  VERSION=${LAST_TAG#${SERVICE}-v}
   echo "📌 Current version: $VERSION"
 
-  # Get commits since last tag
-  COMMITS=$(git log ${LAST_TAG}..HEAD --pretty=format:"%s")
+  # Ask version type
+  echo ""
+  echo "Select version bump for $SERVICE:"
+  echo "1) Major"
+  echo "2) Minor"
+  echo "3) Patch"
+  read -p "Enter choice (1/2/3): " CHOICE
 
-  echo "📝 Commits since last release:"
-  echo "$COMMITS"
-  echo "------------------------------------"
+  case $CHOICE in
+    1) TYPE="major" ;;
+    2) TYPE="minor" ;;
+    3) TYPE="patch" ;;
+    *) echo "❌ Invalid choice"; exit 1 ;;
+  esac
 
-  # Determine version bump
-  if echo "$COMMITS" | grep -q "BREAKING CHANGE\|!:"; then
-    TYPE="major"
-  elif echo "$COMMITS" | grep -q "^feat"; then
-    TYPE="minor"
-  elif echo "$COMMITS" | grep -q "^fix"; then
-    TYPE="patch"
-  else
-    TYPE="patch"
-  fi
-
-  echo "🔧 Version bump type: $TYPE"
+  echo "🔧 Selected: $TYPE"
 
   # Split version
   IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
@@ -111,27 +76,32 @@ for SERVICE in "${SERVICES[@]}"; do
   NEW_VERSION="$MAJOR.$MINOR.$PATCH"
   NEW_TAG="${SERVICE}-v${NEW_VERSION}"
 
-  # Prevent duplicate tag
+  # Avoid duplicate
   if git rev-parse "$NEW_TAG" >/dev/null 2>&1; then
-    echo "⚠️ Tag $NEW_TAG already exists, skipping..."
+    echo "⚠️ Tag already exists: $NEW_TAG"
     continue
   fi
 
-  echo "🏷️ Creating tag: $NEW_TAG"
-  git tag $NEW_TAG
+  echo "🏷️ New tag: $NEW_TAG"
+
+  # Ask release notes
+  echo ""
+  read -p "📝 Enter release notes: " NOTES
+
+  # Create tag
+  git tag -a $NEW_TAG -m "$NOTES"
   git push origin $NEW_TAG
 
-  # Optional GitHub release
+  # Create GitHub release (optional)
   if command -v gh &> /dev/null; then
-    echo "📦 Creating GitHub release..."
     gh release create $NEW_TAG \
       --title "$NEW_TAG" \
-      --notes "Release for $SERVICE version $NEW_VERSION"
+      --notes "$NOTES"
   else
     echo "⚠️ gh CLI not installed, skipping GitHub release"
   fi
 
-  echo "✅ Done for $SERVICE"
+  echo "✅ Released $SERVICE as $NEW_TAG"
   echo "------------------------------------"
 
 done
