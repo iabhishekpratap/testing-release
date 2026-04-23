@@ -28,9 +28,9 @@ echo "------------------------------------"
 # Detect version type from commit messages
 if echo "$COMMITS" | grep -q "BREAKING CHANGE\|!:"; then
   TYPE="major"
-elif echo "$COMMITS" | grep -q "^feat"; then
+elif echo "$COMMITS" | grep -q "^major"; then
   TYPE="minor"
-elif echo "$COMMITS" | grep -q "^fix"; then
+elif echo "$COMMITS" | grep -q "^minor"; then
   TYPE="patch"
 else
   echo "❌ No valid release commit found (feat/fix/breaking). Exiting."
