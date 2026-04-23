@@ -2,65 +2,66 @@
 
 set -e
 
-echo "🔍 Detecting changed services..."
+echo "🔍 Detecting changes and commit type..."
 
-# Detect changes
-CHANGED_FILES=$(git diff --name-only origin/main...HEAD 2>/dev/null || git diff --name-only HEAD~1 HEAD)
+FOLDERS=("dir1" "dir2")
 
-echo "Changed files:"
-echo "$CHANGED_FILES"
+# Determine commit range
+if [ -n "$GIT_PREVIOUS_SUCCESSFUL_COMMIT" ]; then
+  BASE=$GIT_PREVIOUS_SUCCESSFUL_COMMIT
+  HEAD_COMMIT=$GIT_COMMIT
+else
+  BASE=HEAD~1
+  HEAD_COMMIT=HEAD
+fi
+
+echo "Comparing: $BASE → $HEAD_COMMIT"
 echo "------------------------------------"
 
-SERVICES=()
-ALL_SERVICES=("dir1" "dir2")
+# Get commit messages
+COMMITS=$(git log $BASE..$HEAD_COMMIT --pretty=format:"%s")
 
-# Detect changed services
-for SERVICE in "${ALL_SERVICES[@]}"; do
-  if echo "$CHANGED_FILES" | grep -q "^${SERVICE}/"; then
-    echo "✅ Changes detected in $SERVICE"
-    SERVICES+=("$SERVICE")
-  else
-    echo "❌ No changes in $SERVICE"
-  fi
-done
+echo "📝 Commit messages:"
+echo "$COMMITS"
+echo "------------------------------------"
 
-if [ ${#SERVICES[@]} -eq 0 ]; then
-  echo "❌ No relevant service changes detected. Exiting."
+# Detect version type from commit messages
+if echo "$COMMITS" | grep -q "BREAKING CHANGE\|!:"; then
+  TYPE="major"
+elif echo "$COMMITS" | grep -q "^feat"; then
+  TYPE="minor"
+elif echo "$COMMITS" | grep -q "^fix"; then
+  TYPE="patch"
+else
+  echo "❌ No valid release commit found (feat/fix/breaking). Exiting."
   exit 0
 fi
 
+echo "🔧 Release type: $TYPE"
 echo "------------------------------------"
 
-# Process each service
-for SERVICE in "${SERVICES[@]}"; do
-  echo "🚀 Processing $SERVICE..."
+# Process each folder
+for FOLDER in "${FOLDERS[@]}"; do
+  echo "Checking $FOLDER..."
 
-  LAST_TAG=$(git tag --list "${SERVICE}-v*" --sort=-v:refname | head -n 1)
+  # Check content changes inside folder
+  if git diff --quiet $BASE $HEAD_COMMIT -- "$FOLDER/"; then
+    echo "❌ No changes in $FOLDER"
+    continue
+  fi
+
+  echo "✅ Changes detected in $FOLDER"
+
+  # Get last tag
+  LAST_TAG=$(git tag --list "${FOLDER}-v*" --sort=-v:refname | head -n 1)
 
   if [ -z "$LAST_TAG" ]; then
     VERSION="0.0.0"
   else
-    VERSION=${LAST_TAG#${SERVICE}-v}
+    VERSION=${LAST_TAG#${FOLDER}-v}
   fi
 
   echo "📌 Current version: $VERSION"
-
-  # Ask version type
-  echo ""
-  echo "Select version bump for $SERVICE:"
-  echo "1) Major"
-  echo "2) Minor"
-  echo "3) Patch"
-  read -p "Enter choice (1/2/3): " CHOICE
-
-  case $CHOICE in
-    1) TYPE="major" ;;
-    2) TYPE="minor" ;;
-    3) TYPE="patch" ;;
-    *) echo "❌ Invalid choice"; exit 1 ;;
-  esac
-
-  echo "🔧 Selected: $TYPE"
 
   # Split version
   IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
@@ -74,36 +75,31 @@ for SERVICE in "${SERVICES[@]}"; do
   fi
 
   NEW_VERSION="$MAJOR.$MINOR.$PATCH"
-  NEW_TAG="${SERVICE}-v${NEW_VERSION}"
+  NEW_TAG="${FOLDER}-v${NEW_VERSION}"
 
-  # Avoid duplicate
+  # Prevent duplicate
   if git rev-parse "$NEW_TAG" >/dev/null 2>&1; then
     echo "⚠️ Tag already exists: $NEW_TAG"
     continue
   fi
 
-  echo "🏷️ New tag: $NEW_TAG"
+  echo "🏷️ Creating tag: $NEW_TAG"
 
-  # Ask release notes
-  echo ""
-  read -p "📝 Enter release notes: " NOTES
-
-  # Create tag
-  git tag -a $NEW_TAG -m "$NOTES"
+  git tag -a $NEW_TAG -m "$COMMITS"
   git push origin $NEW_TAG
 
-  # Create GitHub release (optional)
+  # GitHub release
   if command -v gh &> /dev/null; then
     gh release create $NEW_TAG \
       --title "$NEW_TAG" \
-      --notes "$NOTES"
+      --notes "$COMMITS"
   else
     echo "⚠️ gh CLI not installed, skipping GitHub release"
   fi
 
-  echo "✅ Released $SERVICE as $NEW_TAG"
+  echo "✅ Released $FOLDER as $NEW_TAG"
   echo "------------------------------------"
 
 done
 
-echo "🎉 All done!"
+echo "🎉 Done!"
