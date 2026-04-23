@@ -6,45 +6,59 @@ echo "🔍 Detecting changes and commit type..."
 
 FOLDERS=("dir1" "dir2")
 
-# Determine commit range
-if [ -n "$GIT_PREVIOUS_SUCCESSFUL_COMMIT" ]; then
-  BASE=$GIT_PREVIOUS_SUCCESSFUL_COMMIT
-  HEAD_COMMIT=$GIT_COMMIT
+# -----------------------------
+# DETERMINE BASE COMMIT (FIXED)
+# -----------------------------
+LAST_GLOBAL_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+
+if [ -n "$LAST_GLOBAL_TAG" ]; then
+  BASE=$LAST_GLOBAL_TAG
+  echo "Using last tag as base: $BASE"
 else
+  echo "No previous tag found → using HEAD~1"
   BASE=HEAD~1
-  HEAD_COMMIT=HEAD
 fi
+
+HEAD_COMMIT=HEAD
 
 echo "Comparing: $BASE → $HEAD_COMMIT"
 echo "------------------------------------"
 
-# Get commit messages
+# -----------------------------
+# GET COMMIT MESSAGES
+# -----------------------------
 COMMITS=$(git log $BASE..$HEAD_COMMIT --pretty=format:"%s")
 
 echo "📝 Commit messages:"
 echo "$COMMITS"
 echo "------------------------------------"
 
-# Detect version type from commit messages
+# -----------------------------
+# DETERMINE VERSION TYPE (FIXED)
+# -----------------------------
 if echo "$COMMITS" | grep -q "BREAKING CHANGE\|!:"; then
   TYPE="major"
 elif echo "$COMMITS" | grep -q "^major"; then
-  TYPE="minor"
+  TYPE="major"
 elif echo "$COMMITS" | grep -q "^minor"; then
+  TYPE="minor"
+elif echo "$COMMITS" | grep -q "^patch"; then
   TYPE="patch"
 else
-  echo "❌ No valid release commit found (feat/fix/breaking). Exiting."
+  echo "❌ No valid release commit found (major/minor/patch). Exiting."
   exit 0
 fi
 
 echo "🔧 Release type: $TYPE"
 echo "------------------------------------"
 
-# Process each folder
+# -----------------------------
+# PROCESS EACH FOLDER
+# -----------------------------
 for FOLDER in "${FOLDERS[@]}"; do
   echo "Checking $FOLDER..."
 
-  # Check content changes inside folder
+  # Check if folder content changed
   if git diff --quiet $BASE $HEAD_COMMIT -- "$FOLDER/"; then
     echo "❌ No changes in $FOLDER"
     continue
@@ -52,7 +66,7 @@ for FOLDER in "${FOLDERS[@]}"; do
 
   echo "✅ Changes detected in $FOLDER"
 
-  # Get last tag
+  # Get last tag for this service
   LAST_TAG=$(git tag --list "${FOLDER}-v*" --sort=-v:refname | head -n 1)
 
   if [ -z "$LAST_TAG" ]; then
@@ -77,7 +91,7 @@ for FOLDER in "${FOLDERS[@]}"; do
   NEW_VERSION="$MAJOR.$MINOR.$PATCH"
   NEW_TAG="${FOLDER}-v${NEW_VERSION}"
 
-  # Prevent duplicate
+  # Prevent duplicate tag
   if git rev-parse "$NEW_TAG" >/dev/null 2>&1; then
     echo "⚠️ Tag already exists: $NEW_TAG"
     continue
@@ -88,7 +102,7 @@ for FOLDER in "${FOLDERS[@]}"; do
   git tag -a $NEW_TAG -m "$COMMITS"
   git push origin $NEW_TAG
 
-  # GitHub release
+  # Optional GitHub release
   if command -v gh &> /dev/null; then
     gh release create $NEW_TAG \
       --title "$NEW_TAG" \
