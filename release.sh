@@ -2,11 +2,41 @@
 
 set -e
 
-echo "🔍 Detecting changes and commit type..."
+echo "🔍 Starting release process..."
 
+# -----------------------------
+# REQUIRE PR TITLE
+# -----------------------------
+if [ -z "$PR_TITLE" ]; then
+  echo "❌ PR_TITLE not provided"
+  exit 1
+fi
+
+echo "📌 PR Title: $PR_TITLE"
+
+# -----------------------------
+# DETERMINE TYPE FROM PR TITLE
+# -----------------------------
+if echo "$PR_TITLE" | grep -iq "breaking\|major"; then
+  TYPE="major"
+elif echo "$PR_TITLE" | grep -iq "minor"; then
+  TYPE="minor"
+elif echo "$PR_TITLE" | grep -iq "patch"; then
+  TYPE="patch"
+else
+  echo "❌ PR title does not contain version type"
+  exit 0
+fi
+
+echo "🔧 Release type: $TYPE"
+
+# -----------------------------
+# SETUP
+# -----------------------------
 FOLDERS=("dir1" "dir2")
-
 HEAD_COMMIT=HEAD
+
+git fetch --tags
 
 echo "------------------------------------"
 
@@ -14,22 +44,20 @@ for FOLDER in "${FOLDERS[@]}"; do
   echo "📁 Processing $FOLDER..."
 
   # -----------------------------
-  # GET LAST TAG PER FOLDER (FIXED)
+  # GET LAST TAG
   # -----------------------------
   LAST_TAG=$(git tag --list "${FOLDER}-v*" --sort=-v:refname | head -n 1)
 
   if [ -n "$LAST_TAG" ]; then
     BASE=$LAST_TAG
-    echo "Using last tag for $FOLDER: $BASE"
   else
     BASE=HEAD~1
-    echo "No previous tag for $FOLDER → using HEAD~1"
   fi
 
   echo "Comparing: $BASE → $HEAD_COMMIT"
 
   # -----------------------------
-  # CHECK FOLDER CONTENT CHANGE
+  # CHECK FOLDER CHANGES
   # -----------------------------
   if git diff --quiet $BASE $HEAD_COMMIT -- "$FOLDER/"; then
     echo "❌ No changes in $FOLDER"
@@ -40,33 +68,6 @@ for FOLDER in "${FOLDERS[@]}"; do
   echo "✅ Changes detected in $FOLDER"
 
   # -----------------------------
-  # GET COMMITS FOR THIS FOLDER
-  # -----------------------------
-  COMMITS=$(git log $BASE..$HEAD_COMMIT --pretty=format:"%s" -- "$FOLDER/")
-
-  echo "📝 Commits:"
-  echo "$COMMITS"
-
-  # -----------------------------
-  # DETERMINE VERSION TYPE
-  # -----------------------------
-  if echo "$COMMITS" | grep -q "BREAKING CHANGE\|!:"; then
-    TYPE="major"
-  elif echo "$COMMITS" | grep -q "^major"; then
-    TYPE="major"
-  elif echo "$COMMITS" | grep -q "^minor"; then
-    TYPE="minor"
-  elif echo "$COMMITS" | grep -q "^patch"; then
-    TYPE="patch"
-  else
-    echo "❌ No valid release commit for $FOLDER"
-    echo "------------------------------------"
-    continue
-  fi
-
-  echo "🔧 Release type: $TYPE"
-
-  # -----------------------------
   # CURRENT VERSION
   # -----------------------------
   if [ -z "$LAST_TAG" ]; then
@@ -74,8 +75,6 @@ for FOLDER in "${FOLDERS[@]}"; do
   else
     VERSION=${LAST_TAG#${FOLDER}-v}
   fi
-
-  echo "📌 Current version: $VERSION"
 
   IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
 
@@ -103,23 +102,12 @@ for FOLDER in "${FOLDERS[@]}"; do
   fi
 
   # -----------------------------
-  # CREATE TAG + PUSH
+  # CREATE TAG
   # -----------------------------
   echo "🏷️ Creating tag: $NEW_TAG"
 
-  git tag -a $NEW_TAG -m "$COMMITS"
-  git push origin $NEW_TAG
-
-  # -----------------------------
-  # GITHUB RELEASE (OPTIONAL)
-  # -----------------------------
-  if command -v gh &> /dev/null; then
-    gh release create $NEW_TAG \
-      --title "$NEW_TAG" \
-      --notes "$COMMITS"
-  else
-    echo "⚠️ gh CLI not installed, skipping GitHub release"
-  fi
+  git tag -a "$NEW_TAG" -m "$PR_TITLE"
+  git push origin "$NEW_TAG"
 
   echo "✅ Released $FOLDER as $NEW_TAG"
   echo "------------------------------------"

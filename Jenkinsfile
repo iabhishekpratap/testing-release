@@ -23,6 +23,7 @@ pipeline {
             }
             steps {
                 sh '''
+                export PR_TITLE="$PR_TITLE"
                 git fetch --tags
                 chmod +x release.sh
                 ./release.sh
