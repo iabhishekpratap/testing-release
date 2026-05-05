@@ -1,22 +1,38 @@
 pipeline {
     agent any
 
+    triggers {
+        githubPush()   
+    }
+
     environment {
-        GITHUB_TOKEN = credentials('github') // add in Jenkins credentials
+        BRANCH_NAME = 'main'
     }
 
     stages {
+
         stage('Checkout') {
             steps {
-                checkout scm
+                git branch: "${BRANCH_NAME}", 
+                    url: 'https://github.com/iabhishekpratap/testing-release.git'
             }
         }
 
         stage('Run Script') {
             steps {
+                echo "Running pipeline for main branch 🚀"
                 sh 'chmod +x script.sh'
                 sh './script.sh'
             }
+        }
+    }
+
+    post {
+        success {
+            echo 'Build Success ✅'
+        }
+        failure {
+            echo 'Build Failed ❌'
         }
     }
 }
